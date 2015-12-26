@@ -1,0 +1,9 @@
+silent=0
+#Blocked File Extensions:
+xls
+xlsx
+pdf
+doc
+docx
+exe
+bat
