@@ -37,7 +37,7 @@ def handle_packet(pkt):
 			src_ip = scapy_packet['IP'].src
 			dst_ip = scapy_packet['IP'].dst
 			
-			# discover all subnets
+			# Discover all subnets
 			internal_nets = []
 			addresses = [get_if_addr(i) for i in get_if_list()]
 			for addr in addresses:
@@ -47,7 +47,19 @@ def handle_packet(pkt):
 			if dst_port == SSH_PORT and get_subnet_from_ip(dst_ip) in internal_nets:
 				if not silent:
 					print 'Detected remote shell execution attempt from', str(src_ip) + '. ACTION: DROP'
-				pkt.drop()				
+				pkt.drop()	
+			# Check if file extension was spoofed (magic)
+			elif str(payload)[0:15] == 'HTTP/1.1 200 OK':
+				data = str(payload).split('\r\n\r\n')[1]
+				data = str("".join("{:02x}".format(ord(c)) for c in data))
+
+				for magic in magic_numbers:					
+					cut = (data[0:len(magic)])
+					if cut.lower() == magic.lower():
+						print 'Detected attempt of file extension spoofing. ACTION: DROP'
+						pkt.drop()
+						return
+				pkt.accept()
 			else:
 				pkt.accept()
 	else:
@@ -65,7 +77,9 @@ if __name__ == '__main__':
 
 	silent = True if config[0].split('=')[1] == '1' else False
 	blacklist = config[config.index('#Blocked File Extensions:')+1:]
-
+	magic_numbers = [x.split('-')[1] for x in blacklist]
+	magic_numbers = filter(lambda x : x != '', magic_numbers)
+	blacklist = [x.split('-')[0] for x in blacklist]
 	print 'Started Packet Filter in ' + ('silent ' if silent else 'loud ') + 'mode.'
 
 	nfqueue = NetfilterQueue()
