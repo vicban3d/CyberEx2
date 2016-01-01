@@ -34,16 +34,8 @@ def handle_packet(pkt):
 			extension = filename.split('.')[len(filename.split('.')) - 1]
 			if extension in blacklist:
 				if not silent:					
-					print 'Detected request for', extension, 'file. ACTION: DROP'
-					response = scapy_packet
-					response['TCP'].dport = src_port
-					response['TCP'].sport = dst_port
-					response['IP'].src = dst_ip
-					response['IP'].dst = src_ip
-					response['TCP'].flags = 'R'					
-					del response['IP'].chksum
-					send(response)
-				pkt.accept()		
+					send(IP(src=dst_ip, dst=src_ip)/TCP(sport=dst_port, dport=src_port, flags=0x04, seq=scapy_packet['TCP'].ack))
+				pkt.drop()		
 			else:
 				pkt.accept()		
 		else:						
@@ -54,13 +46,12 @@ def handle_packet(pkt):
 				internal_nets.append(get_subnet_from_ip(addr))
 			
 			# Check for ssh session attempts
-			if dst_port == SSH_PORT and get_subnet_from_ip(dst_ip) in internal_nets:
-				print 'FLAGS', scapy_packet['TCP'].flags
+			if dst_port == SSH_PORT and get_subnet_from_ip(dst_ip) in internal_nets:				
 				if scapy_packet['TCP'].flags == 0x02 or scapy_packet['TCP'].flags == 0x12:
 					pkt.accept()
 				elif scapy_packet['TCP'].flags == 0x10:					
-					if not silent:					
-						send(IP(src=dst_ip, dst=src_ip)/TCP(sport=dst_port, dport=src_port, flags=0x04, seq=1))
+					if not silent:	
+						send(IP(src=dst_ip, dst=src_ip)/TCP(sport=dst_port, dport=src_port, flags=0x04, seq=scapy_packet['TCP'].ack))
 					pkt.drop()					
 				else:
 					pkt.accept()
@@ -73,6 +64,8 @@ def handle_packet(pkt):
 					cut = (data[0:len(magic)])
 					if cut.lower() == magic.lower():
 						print 'Detected attempt of file extension spoofing. ACTION: DROP'
+						if not silent:					
+							send(IP(src=dst_ip, dst=src_ip)/TCP(sport=dst_port, dport=src_port, flags=0x04, seq=scapy_packet['TCP'].ack))
 						pkt.drop()
 						return
 				pkt.accept()
