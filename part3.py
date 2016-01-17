@@ -3,6 +3,67 @@
 """
 Cyber Assignment 2, part 3.
 Authors: Victor Banshats and Zvi Azran
+
+Algorithm for file blocking:
+
+    The algorithm looks at two approaches:
+
+    Firstly, if the client request a file via HTTP the file
+    extension is examined through the GET [path] [version]
+    header. If the file contains a forbidden extension the
+    packet is dropped.
+
+    Secondly, the algorithm detects fake file extensions on
+    received files. If the client requests a legitimate file
+    the algorithm examines the received HTTP response. if
+    the content of the '200 OK' message's body starts with a
+    magic identifier of one of the forbidden files the response
+    is dropped.
+
+    All file extensions and corresponding magic identifiers
+    are specified in the configuration file.
+
+Algorithm for port knocking:
+
+    Before an SSH connection is allowed it must exist in the
+    ALLOWED_SSH_CONNECTIONS list.
+    To be inserted into the list the client must send a ping with
+    payload size of THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING.
+
+    Dealing with replay attacks:
+
+    An attacker may sniff the client's traffic and replay it,
+    including the secret ping key as mentioned above. To deal
+    with this, the ICMP id field is stored along side the
+    connection with the assumption that the same id cannot be
+    sent from the same client over two different ping requests.
+    If a ping from an allowed client with the allowed id is
+    received again, the packet is dropped.
+
+    Dealing with spoofing:
+
+    When a client connects via SSH his connection id from the IP
+    layer is stored along side his ip address. If an attacker attempts
+    to connect with the same IP address his id will not match the
+    id of the true connection. The algorithm constantly keeps track
+    of the progressing id number to minimize the chance of id spoofing.
+
+    Once the client disconnects from the SSH session he will not be
+    allowed to start another before he performs the port knocking
+    procedure again.
+
+    Known vulnerability:
+        If the client sends the correct ping, an attacker may use the time
+        window between the recieving of the ping and the initiation of the
+        SSH conenction by the client to hijack the permission and establish
+        an SSH connection with a spoofed IP address. In this case the client
+        will be blocked by the GW.
+
+    attached pcap files:
+        ssh_success.pcap
+        ssh_fail.pcap
+        ssh_spoofing.pcap
+
 """
 
 import os
@@ -14,7 +75,7 @@ from scapy.all import conf
 from scapy.layers.inet import IP, TCP, ICMP
 from scapy.sendrecv import send
 
-CONF_FILENAME = 'conf' # name of configuration file
+CONF_FILENAME = 'conf'  # name of configuration file
 # list of forbidden file extensions and related magic numbers
 FILE_EXTENSIONS = None
 SILENT = False  # silent mode configuration
@@ -32,14 +93,14 @@ MAX_FRAGMENT_CACHE = 4
 MAX_CONNECTION_BUFFER_SIZE = 64
 THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING = 42
 PACKET_BUFFER = {}
-ALLOWED_SSH_CONENCTIONS = {}
+ALLOWED_SSH_CONNECTIONS = {}
 SSH_CONNECTION_ID = {}
 FIN_RECEIVED = False
 
 
 def handle_packet(pkt):
     """
-    Handles traffic and ecides whether to accept or drop it.
+    Handles traffic and decides whether to accept or drop it.
     :param pkt: the packet received from nfqueue
     :return: None
     """
@@ -83,7 +144,7 @@ def handle_packet(pkt):
                 existing_connection(src_ip, dst_ip, src_port, dst_port):
             # block the connection final ack and send reset of disallowed
             if current_packet['TCP'].flags == TCP_ACK and \
-                            src_ip not in ALLOWED_SSH_CONENCTIONS \
+                            src_ip not in ALLOWED_SSH_CONNECTIONS \
                     and FIN_RECEIVED is False:
                 if not SILENT:
                     send_reset(current_packet)
@@ -104,7 +165,7 @@ def handle_packet(pkt):
                 SSH_CONNECTION_ID.pop(src_ip)
                 pkt.accept()
                 FIN_RECEIVED = True
-                ALLOWED_SSH_CONENCTIONS.pop(src_ip)
+                ALLOWED_SSH_CONNECTIONS.pop(src_ip)
             else:
                 if SSH_CONNECTION_ID[src_ip] == current_packet['IP'].id - 1:
                     SSH_CONNECTION_ID[src_ip] = current_packet['IP'].id
@@ -149,7 +210,7 @@ def handle_packet(pkt):
                 if len(header) != 0 and header[0] == 'GET':
                     # the file name is the last part of the path /a/b/c/file.x
                     file_name = \
-                            header[1].split('/')[len(header[1].split('/')) - 1]
+                        header[1].split('/')[len(header[1].split('/')) - 1]
                     # the extension is the last part of the file name
                     extension = \
                         file_name.split('.')[len(file_name.split('.')) - 1]
@@ -192,25 +253,25 @@ def handle_packet(pkt):
                 # neither src port nor dst port are http (failsafe else)
                 pkt.accept()
         else:
-            # conneciton is neither SSH nor HTTP
+            # connection is neither SSH nor HTTP
             pkt.accept()
     # check for port knocking attempt. SSH will open of payload size is right
     elif IP in current_packet and ICMP in current_packet:
         icmp = current_packet['ICMP']
         if len(icmp.load) == THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING:
             src_ip = current_packet['IP'].src
-            if len(ALLOWED_SSH_CONENCTIONS) >= MAX_CONNECTION_BUFFER_SIZE:
-                ALLOWED_SSH_CONENCTIONS.clear()
+            if len(ALLOWED_SSH_CONNECTIONS) >= MAX_CONNECTION_BUFFER_SIZE:
+                ALLOWED_SSH_CONNECTIONS.clear()
             # two pings from the same client will have different ids
             # if existing id found it is most likely a replay attack
-            if src_ip in ALLOWED_SSH_CONENCTIONS.keys() \
-                    and ALLOWED_SSH_CONENCTIONS[src_ip]\
-                    == current_packet['ICMP'].id:
+            if src_ip in ALLOWED_SSH_CONNECTIONS.keys() \
+                    and ALLOWED_SSH_CONNECTIONS[src_ip] \
+                            == current_packet['ICMP'].id:
                 print '[DROP] Attempt of traffic replay.'
                 pkt.drop()
             else:
                 # add ip to allowed ssh connections
-                ALLOWED_SSH_CONENCTIONS[src_ip] = current_packet['ICMP'].id
+                ALLOWED_SSH_CONNECTIONS[src_ip] = current_packet['ICMP'].id
             # accept in any case
             pkt.accept()
     else:
@@ -233,7 +294,7 @@ def existing_connection(src_ip, dst_ip, src_port, dst_port):
     routing_tuple_reverse = str(dst_ip) + '-' + str(src_ip) + '-' + str(
             dst_port) + '-' + str(src_port)
     return routing_tuple in PACKET_BUFFER.keys() \
-        or routing_tuple_reverse in PACKET_BUFFER.keys()
+           or routing_tuple_reverse in PACKET_BUFFER.keys()
 
 
 def get_connection_key(src_ip, dst_ip, src_port, dst_port):
