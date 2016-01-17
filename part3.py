@@ -93,7 +93,6 @@ def handle_packet(pkt):
                 pkt.drop()
             elif current_packet['TCP'].flags == TCP_ACK and src_ip not \
                     in SSH_CONNECTION_ID.keys():
-                print FIN_RECEIVED
                 if FIN_RECEIVED is False:
                     # if allowed, accept the connection
                     SSH_CONNECTION_ID[src_ip] = current_packet['IP'].id
