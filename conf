@@ -1,4 +1,5 @@
 SILENT=0
+SSH_AUTH_METHOD=1
 # Forbidden Files:
 xls-D0CF11E0A1B11AE1
 xlsx-504B0304

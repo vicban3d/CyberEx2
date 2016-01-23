@@ -25,6 +25,11 @@ Algorithm for file blocking:
 
 Algorithm for port knocking:
 
+    There are 2 methods for establishing an SSH connection:
+    * 1: Weak protection (SSH_AUTHENTICATION_METHOD=0)
+
+    Advantage: No code has run on the client side.
+
     Before an SSH connection is allowed it must exist in the
     ALLOWED_SSH_CONNECTIONS list.
     To be inserted into the list the client must send a ping with
@@ -59,8 +64,23 @@ Algorithm for port knocking:
         an SSH connection with a spoofed IP address. In this case the client
         will be blocked by the GW.
 
+    * 2: Stronger protection (SSH_AUTHENTICATION_METHOD=1)
+
+    The client must run "secure_ssh.py" before attempting to connect.
+    the script handles server authentication using a shared key, SHA256
+    and a growing counter to authenticate the client. Spoofing and replay
+    attacks are dealt with by incrementing the counter and obfuscating it
+    with the secret key using SHA256.
+
+    Known vulnerability:
+        The counters on the client and gateway must always be in sync. If
+        the client closes the secure_ssh script his counter will be reset
+        while the server's remains as is. Some kind of synching mechanism
+        must be introduced.
+
     attached pcap files:
-        ssh_success.pcap
+        ssh_weak_success.pcap
+        ssh_strong_success.pcap
         ssh_fail.pcap
         ssh_spoofing.pcap
 
@@ -74,6 +94,10 @@ from scapy.all import conf
 # name of configurations file
 from scapy.layers.inet import IP, TCP, ICMP
 from scapy.sendrecv import send
+
+from hashlib import sha256
+
+import hmac
 
 CONF_FILENAME = 'conf'  # name of configuration file
 # list of forbidden file extensions and related magic numbers
@@ -97,6 +121,10 @@ ALLOWED_SSH_CONNECTIONS = {}
 SSH_CONNECTION_ID = {}
 FIN_RECEIVED = False
 
+KEY = "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+COUNTER = 42
+SSH_AUTHENTICATION_METHOD = 1
+
 
 def handle_packet(pkt):
     """
@@ -106,6 +134,7 @@ def handle_packet(pkt):
     """
 
     global FIN_RECEIVED
+    global COUNTER
 
     # a scapy representation of the received packet
     current_packet = IP(pkt.get_payload())
@@ -142,10 +171,37 @@ def handle_packet(pkt):
         # if the connection is an SSH attempt and it is established
         elif dst_port == SSH_PORT and \
                 existing_connection(src_ip, dst_ip, src_port, dst_port):
-            # block the connection final ack and send reset of disallowed
             if current_packet['TCP'].flags == TCP_ACK and \
+                SSH_AUTHENTICATION_METHOD == 1 and \
+                src_ip not in ALLOWED_SSH_CONNECTIONS:
+                payload = str(current_packet['TCP'].payload)
+                expected = hmac.new(KEY, str(COUNTER), sha256).digest()
+                if expected != payload:
+                    if not SILENT:
+                        send_reset(current_packet)
+                    print '[DROP] Attempt of insecure SSH connection', \
+                        current_packet['IP'].src + '.'
+                    PACKET_BUFFER.pop(routing_tuple)
+                    pkt.drop()
+                else:
+                    ALLOWED_SSH_CONNECTIONS[src_ip] = COUNTER
+                    COUNTER += 1
+                    ip_pkt = IP(src=current_packet[IP].src, \
+                        dst=current_packet[IP].dst)
+                    tcp_pkt = TCP(dport=SSH_PORT, \
+                        sport=current_packet[TCP].sport, \
+                    seq=current_packet[TCP].seq, \
+                    ack=(current_packet[TCP].ack), flags='A')
+
+                    # send http message
+                    sent_packet = ip_pkt / tcp_pkt
+                    send(sent_packet)
+                    pkt.drop()
+            # block the connection final ack and send reset of disallowed
+            elif current_packet['TCP'].flags == TCP_ACK and \
                             src_ip not in ALLOWED_SSH_CONNECTIONS \
-                    and FIN_RECEIVED is False:
+                    and FIN_RECEIVED is False and \
+                    SSH_AUTHENTICATION_METHOD == 0:
                 if not SILENT:
                     send_reset(current_packet)
                 print '[DROP] Attempt to establish SSH connection from', \
@@ -167,8 +223,11 @@ def handle_packet(pkt):
                 FIN_RECEIVED = True
                 ALLOWED_SSH_CONNECTIONS.pop(src_ip)
             else:
-                if SSH_CONNECTION_ID[src_ip] == current_packet['IP'].id - 1:
+                if SSH_AUTHENTICATION_METHOD == 0 and \
+                SSH_CONNECTION_ID[src_ip] == current_packet['IP'].id - 1:
                     SSH_CONNECTION_ID[src_ip] = current_packet['IP'].id
+                    pkt.accept()
+                elif SSH_AUTHENTICATION_METHOD == 1:
                     pkt.accept()
                 else:
                     if not SILENT:
@@ -360,8 +419,9 @@ if __name__ == '__main__':
         CONFIG_FILE = [str.strip(x) for x in f.readlines()]
     # read silent mode config
     SILENT = True if CONFIG_FILE[0].split('=')[1] == '1' else False
+    SSH_AUTHENTICATION_METHOD = int(CONFIG_FILE[1].split('=')[1])
     # skip to files
-    CONFIG_FILE = CONFIG_FILE[2:]
+    CONFIG_FILE = CONFIG_FILE[3:]
     MAGIC_NUMBERS = [x for x in [cur.split('-')[1] for cur in CONFIG_FILE]
                      if x != '']
 
