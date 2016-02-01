@@ -1,6 +1,9 @@
 #!/usr/bin/python
 '''
-cyber assignment 2 question 2 server
+Assignment 2, question 2 server.
+
+The server authenticates messages by creating a digest with a secret
+symmetric key.
 '''
 
 from hashlib import sha256
@@ -32,12 +35,12 @@ class MyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
         hmac_and_msg = self.rfile.read( \
         	int(self.headers.getheader('content-length')))
-
+        # separate hmac and message
         only_hmac = hmac_and_msg[:32]
         only_msg = hmac_and_msg[32:]
 
         enc_msg = hmac.new(KEY, only_msg, sha256).digest()
-
+        # authenticate user
         if only_hmac == enc_msg:
             self.send_response(200)
             self.send_header("Content-type", "text/html")
@@ -54,7 +57,6 @@ class MyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.wfile.write("<html><head><title>Ex2 WebServer</title></head>")
             self.wfile.write("<body><p>UNAUTHORIZED ACCESS!!</p>")
             self.wfile.write("</body></html>")
-
 
 
 if __name__ == '__main__':

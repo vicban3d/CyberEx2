@@ -1,6 +1,9 @@
 #! /usr/bin/python
 """
-cyber assignment 2 question 2 client
+Assignment 2, question 2 client.
+
+The client authenticates himself by adding a hash digest to every outbound
+message. The digest is created using a symmetric key.
 """
 import hmac
 import sys
@@ -20,17 +23,17 @@ def send_hmac_msg(args):
     dst_ip = args.dst
     random_port = random.randint(1024, 65535)
 
+    # send syn
     ip_pkt = IP(src=src_ip, dst=dst_ip)
     tcp_pkt = TCP(dport=8080, sport=random_port, \
         seq=random.randint(0, 100000), flags='S')
+    # receive syn+ack
     syn_ack = sr1(ip_pkt / tcp_pkt)
-
-    print "Got SYN+ACK, returning ACK..."
-
+    # send ack
     tcp_pkt = TCP(dport=8080, sport=random_port, \
     seq=syn_ack[TCP].ack, ack=(syn_ack[TCP].seq + 1), flags='A')
     send(ip_pkt / tcp_pkt)
-
+    # send data
     hmac_msg = hmac.new(KEY, args.msg, sha256).digest()
     http_msg = "GET / HTTP/1.1\r\nContent-Length: " + \
     str(len(hmac_msg)+len(args.msg)) + "\r\n\r\n" + hmac_msg + args.msg
